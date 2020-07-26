@@ -11,13 +11,17 @@ using namespace std;
 //LINEAR GAUSS MARKOV model
 //or Hagan's numeraire
 
-class lgmonefactor
+//a struct to initiata volatilty and mean reversion
+struct lgmonefactor
 {
+    vector<double> volatility;
+    double meanreversionparameter;
     //ctor
     //move-no need
     //
 };
 
+//functor to calculate mean reversion integral
 struct lgmmeanreversion //int_0^t exp(-\int_0^s param du) ds
 {
     double param;
@@ -28,14 +32,16 @@ struct lgmmeanreversion //int_0^t exp(-\int_0^s param du) ds
     }
 };
 
-
+//should take a model (volatility and mean rversion param)
+//and some other data (strike etc.)
+//and produce a swaption price
 struct lgmswaptionprice
 {
     double operator() (double vol, double strike, size_t numOfPeriods, 
                 double meanreversionparam,
                 double breakEvenRate,
                 double startTime, //swap start
-               const vector<double>& tau,
+               const vector<double>& tau, //period year fractions
                const vector<double>& paymTimes, 
                  const vector<double>& discVector)
     {
@@ -61,4 +67,12 @@ struct lgmswaptionprice
         }
         return aux;
     }
+};
+
+class lgmpde //only explicit method based discrete version
+{
+    vector<double> payAtEnd;
+    vector<double,double> upperLowerBoundary; //this should be zero for lgm
+
+    public
 };
