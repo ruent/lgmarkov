@@ -7,10 +7,25 @@
 #include "solvers/nonlinearsolvers.h"
 using namespace std;
 
- 
+
+
 
 //LINEAR GAUSS MARKOV model
 //or Hagan's numeraire
+
+//since I cannot get this data natively
+//I'll cache it here in this struct
+//I'll assume data for each +1month, relative to
+//price date
+//calling functions can calculate the time multiple and retrive the
+//stored numbers
+struct timezero
+{
+    const vector<double>& tau; //period year fractions
+    const vector<double>& endTimes;  
+    const vector<double>& discVector; //a discount value for each endtime
+};
+
 
 //a struct to initiata volatilty and mean reversion
 struct lgmonefactor
@@ -40,21 +55,23 @@ struct lgmmeanreversion //int_0^t exp(-\int_0^s param du) ds
     }
 };
 
+struct basicswaption
+{
+    double swaptionExpiry; //in years = swap start time
+    double swapTenor; //in years
+    double strike;
+    size_t numOfPeriods;
+}
+
 //should take a model (volatility and mean rversion param)
 //and some other data (strike etc.)
 //and produce a swaption price
 //THIS WILL BE A FUNCTOR in volatility
 struct lgmswaptionprice
 {
-    double swaptionExpiry; //in years = swap start time
-    double swapTenor; //in years
-     
-    double strike;
-    size_t numOfPeriods;
-    const vector<double>& tau; //period year fractions
-    const vector<double>& paymTimes; 
-    const vector<double>& discVector;
-    lgmonefactor* model; //model->meanrev
+    basicswaption& s;
+    timezero& tZero; 
+    lgmonefactor& model; //model->meanrev
     lgmswapprice swapprice;
 
 
@@ -69,9 +86,9 @@ struct lgmswaptionprice
          
         double aux = 0;
         //auto e = discVector.begin(); e != discVector.end(); ++e
-        for (size_t i = 0; i<numOfPeriods; ++i)
+        for (size_t i = 0; i<s.numOfPeriods; ++i)
         {
-            double h = model->H(paymTimes[i]) - model->H(paymTimes[0]);
+            double h = model.H(s.paymTimes[i]) - model.H(paymTimes[0]);
             if (i == 0) 
                 aux += -discVector[i] * normalCdf(breakEvenRate/sqrt(vol));
             else
@@ -103,9 +120,7 @@ class lgmpde //only explicit method based discrete version
 struct lgmswapprice
 {
     lgmonefactor* model;  
-    const vector<double>& tau; //period year fractions
-    const vector<double>& paymTimes; 
-    const vector<double>& discVector;
+    timezero& tZero;
     double vol;
     double fixrate;
     double swapstarttime;
