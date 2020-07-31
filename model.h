@@ -9,15 +9,19 @@
 using namespace std;
 
 
-
+const int mdsep = 1/12; //market data is for monthly increments
 
 //LINEAR GAUSS MARKOV model
 //or Hagan's numeraire
 
-//a struct to initiata volatilty and mean reversion
 struct lgmonefactor
 {
-    vector<double> vol; // volatility;
+    //a struct to initiata volatilty and mean reversion
+     
+    // let the vol vector include values for all possible 1 months
+    // then you can reduce this to the available swt of swaption expiries
+    //this can make vol lookup easier
+    vector<double> vol; 
     double meanrev; // mean reversion parameter;
     lgmmeanreversion H;
     lgmonefactor (double expiry = 0.0, double m = 0.0):
@@ -26,9 +30,6 @@ struct lgmonefactor
         //assume vol vector will be provided
         //for each starting three month period
 
-    //ctor
-    //move-no need
-    //
 };
 
 //functor to calculate mean reversion integral
@@ -44,11 +45,14 @@ struct lgmmeanreversion //int_0^t exp(-\int_0^s param du) ds
 
 struct swaption
 {
-    double swaptionExpiry; //in years = swap start time
-    double swapTenor; //in years
+    double expiry; //in years = swap start time
+    //this too is a multiple of 1months as of time 0
+    double tenor; //in years
     double strike;
     size_t numOfPeriods;
-    vector<unsigned short> paymTimes;
+    vector<unsigned int> paymTimes; 
+    //paymTimes are as in marketdata convention:
+    //multiples of 1 months as of time 0
 }
 
 //should take a model (volatility and mean rversion param)
@@ -63,7 +67,11 @@ struct lgmswaptionprice
     lgmswapprice price;
 
 
-    lgmswaptionprice() {}
+    lgmswaptionprice(swaption _s, timezero _z, lgmonefactor _m): 
+            s(_s), z(_z), m(_m)
+      {
+          price()
+      }
 
     double operator() (double vol)  
     {             
@@ -104,27 +112,40 @@ class lgmpde //only explicit method based discrete version
 };
 */
 
-//using formula 5.7a from Hagan's "Evaluating and hedging ..."
+
 struct lgmswapprice
 {
-    lgmonefactor& model;  
-    timezero& z;
-    double vol;
-    double fixrate;
-    double swapstarttime;
-     
-    double operator()(double markov) const
-    {
-        size_t n = paymTimes.size();
+    //using formula 5.7a from Hagan's "Evaluating and hedging ..."
+    //swap is from a swaption
+    //no need  for an independent swap, I hope!  
+    lgmonefactor& m;  //mean reversion function H and vol data
+    timezero& z; //cached discount factors
+    swaption& s;
+    
+    //this is not really the swap price
+    //but the one divided by exp(-H_0 y*-0.5 H_0^2 v) 
+    double operator()(double x) const //x is the X ~N(0,\alpha_t)
+    {         
         double value = 0.0;
-        for (size_t i; i<n;++n)
+        size_t j = 1;
+        size_t J = s.paymTimes.size(); //
+        double hdiff, hsqrdiff;
+        for(auto const& i: s.paymTimes) 
         {
-            double hdiff = model.H(paymTimes[i]) - model.H(swapstarttime);
-
-            value += tau[i] * z.discVector[i]*exp(k())
+            if (j == J) break;
+            z.disc[i];
+            hdiff = m.H(i * mdsep) - m.H(s.expiry * mdsep);
+            hsqrdiff = hdiff *(m.H(i *mdsep) + m.H(s.expiry * mdsep));
+            value += z.tau[i] * z.disc[i] * exp(-hdiff * x - 0.5* hsqrdiff *m.vol[s.expiry]);
+            ++j;
         }
-
-        return value*fixrate;
+        //VOL here for the expiry, so is fixed
+        hdiff = m.H(s.paymTimes[J-1] * mdsep) - m.H(s.expiry * mdsep);
+        hsqrdiff = hdiff *(m.H(s.paymTimes[J-1] *mdsep) + m.H(s.expiry * mdsep));
+        value = s.strike * value;
+        value += z.disc[s.paymTimes[J-1]]* exp(-hdiff * x - 0.5* hsqrdiff *m.vol[s.expiry]);
+        value += -z.disc[s.paymTimes[0]] ;
+        return value
     }
 
 };
