@@ -53,7 +53,7 @@ struct swaption
     vector<unsigned int> paymTimes; 
     //paymTimes are as in marketdata convention:
     //multiples of 1 months as of time 0
-}
+};
 
 //should take a model (volatility and mean rversion param)
 //and some other data (strike etc.)
@@ -63,15 +63,12 @@ struct lgmswaptionprice
 {
     swaption& s;
     timezero& z; 
-    lgmonefactor& model; //model->meanrev
+    lgmonefactor& m; //model->meanrev
     lgmswapprice price;
 
 
-    lgmswaptionprice(swaption _s, timezero _z, lgmonefactor _m): 
-            s(_s), z(_z), m(_m)
-      {
-          price()
-      }
+    lgmswaptionprice(swaption& _s, timezero& _z, lgmonefactor& _m): 
+            s(_s), z(_z), m(_m), price(_s,_z,_m) {;}
 
     double operator() (double vol)  
     {             
@@ -84,18 +81,18 @@ struct lgmswaptionprice
         //auto e = discVector.begin(); e != discVector.end(); ++e
         for (size_t i = 0; i<s.numOfPeriods; ++i)
         {
-            double h = model.H(s.paymTimes[i]) - model.H(s.paymTimes[0]);
+            double h = m.H(s.paymTimes[i]) - m.H(s.paymTimes[0]);
             if (i == 0) 
-                aux += -z.discVector[i] * normalCdf(breakEvenRate/sqrt(vol));
+                aux += -z.disc[i] * normalCdf(breakEvenRate/sqrt(vol));
             else
             {                
-                aux += tau[i]*z.discVector[i] * s.strike
+                aux += z.tau[i]*z.disc[i] * s.strike
                         * normalCdf((breakEvenRate + vol* h)/sqrt(vol));
             }
             
             if  (i == s.numOfPeriods-1)
             {
-                aux += z.discVector[i] 
+                aux += z.disc[i] 
                         * normalCdf((breakEvenRate + vol* h)/sqrt(vol));
             } 
         }
@@ -121,6 +118,10 @@ struct lgmswapprice
     lgmonefactor& m;  //mean reversion function H and vol data
     timezero& z; //cached discount factors
     swaption& s;
+
+    lgmswapprice(swaption& _s, timezero& _z, lgmonefactor& _m):
+    s(_s), z(_z), m(_m) {} 
+
     
     //this is not really the swap price
     //but the one divided by exp(-H_0 y*-0.5 H_0^2 v) 
@@ -145,7 +146,7 @@ struct lgmswapprice
         value = s.strike * value;
         value += z.disc[s.paymTimes[J-1]]* exp(-hdiff * x - 0.5* hsqrdiff *m.vol[s.expiry]);
         value += -z.disc[s.paymTimes[0]] ;
-        return value
+        return value;
     }
 
 };
