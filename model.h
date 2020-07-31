@@ -4,7 +4,8 @@
 //CPLUS_INCLUDE_PATH =~/projects 
 //export CPLUS_INCLUDE_PATH
 #include <math.h> 
-#include "solvers/nonlinearsolvers.h"
+#include "nonlinearsolver/methods.h"
+#include "marketdata/mdata.h"
 using namespace std;
 
 
@@ -12,20 +13,6 @@ using namespace std;
 
 //LINEAR GAUSS MARKOV model
 //or Hagan's numeraire
-
-//since I cannot get this data natively
-//I'll cache it here in this struct
-//I'll assume data for each +1month, relative to
-//price date
-//calling functions can calculate the time multiple and retrive the
-//stored numbers
-struct timezero
-{
-    const vector<double>& tau; //period year fractions
-    const vector<double>& endTimes;  
-    const vector<double>& discVector; //a discount value for each endtime
-};
-
 
 //a struct to initiata volatilty and mean reversion
 struct lgmonefactor
