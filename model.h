@@ -1,36 +1,16 @@
  
 #pragma once 
 #include <vector>
-//CPLUS_INCLUDE_PATH =~/projects 
-//export CPLUS_INCLUDE_PATH
-#include <math.h> 
-#include "nonlinsolver/methods.h"
-#include "marketdata/mdata.h"
-using namespace std;
+#include <math.h>
+ 
+#include "../nonlinsolver/methods.h"
+#include "../marketdata/mdata.h"
+#include "../stats/statistics.h"
 
-
-const int mdsep = 1/12; //market data is for monthly increments
+const double mdsep = 1.0/12.0; //market data is for monthly increments
 
 //LINEAR GAUSS MARKOV model
 //or Hagan's numeraire
-
-struct lgmonefactor
-{
-    //a struct to initiata volatilty and mean reversion
-     
-    // let the vol vector include values for all possible 1 months
-    // then you can reduce this to the available swt of swaption expiries
-    //this can make vol lookup easier
-    vector<double> vol; 
-    double meanrev; // mean reversion parameter;
-    lgmmeanreversion H;
-    lgmonefactor (double expiry = 0.0, double m = 0.0):
-        vol(int(expiry/0.25)), meanrev(m) , H(m)   {} 
-        //give expiry in years, 
-        //assume vol vector will be provided
-        //for each starting three month period
-
-};
 
 //functor to calculate mean reversion integral
 struct lgmmeanreversion //int_0^t exp(-\int_0^s param du) ds
@@ -43,72 +23,59 @@ struct lgmmeanreversion //int_0^t exp(-\int_0^s param du) ds
     }
 };
 
-struct swaption
+//a compiler handled version (see Gottschling Ch 5)
+//"let the compiler compute"
+constexpr double lgmmeanrev(double& p, double& t )
 {
-    double expiry; //in years = swap start time
-    //this too is a multiple of 1months as of time 0
-    double tenor; //in years
-    double strike;
-    size_t numOfPeriods;
-    vector<unsigned int> paymTimes; 
-    //paymTimes are as in marketdata convention:
-    //multiples of 1 months as of time 0
-};
+    return (1-exp(-t*p))/p;
+}
 
-//should take a model (volatility and mean rversion param)
-//and some other data (strike etc.)
-//and produce a swaption price
-//THIS WILL BE A FUNCTOR in volatility
-struct lgmswaptionprice
+//a parallel to the timezero data
+struct lgmnumeraire  
 {
-    swaption& s;
-    timezero& z; 
-    lgmonefactor& m; //model->meanrev
-    lgmswapprice price;
-
-
-    lgmswaptionprice(swaption& _s, timezero& _z, lgmonefactor& _m): 
-            s(_s), z(_z), m(_m), price(_s,_z,_m) {;}
-
-    double operator() (double vol)  
-    {             
-        //there is composition here
-        //so please see if it is better to write separate functions
-        //and compose them, ala functional programming
-        double breakEvenRate = bisectionMethod(price,-50,50,0.0000001);
-         
-        double aux = 0;
-        //auto e = discVector.begin(); e != discVector.end(); ++e
-        for (size_t i = 0; i<s.numOfPeriods; ++i)
-        {
-            double h = m.H(s.paymTimes[i]) - m.H(s.paymTimes[0]);
-            if (i == 0) 
-                aux += -z.disc[i] * normalCdf(breakEvenRate/sqrt(vol));
-            else
-            {                
-                aux += z.tau[i]*z.disc[i] * s.strike
-                        * normalCdf((breakEvenRate + vol* h)/sqrt(vol));
-            }
-            
-            if  (i == s.numOfPeriods-1)
-            {
-                aux += z.disc[i] 
-                        * normalCdf((breakEvenRate + vol* h)/sqrt(vol));
-            } 
-        }
-        return aux;
+    lgmmeanreversion& H;
+    lgmnumeraire(lgmmeanreversion& _H): H(_H){}
+    double operator()(const double& disc, const double& vol,
+               const double& t, const double& x) const
+    {
+        double h = H(t);
+        return (1/disc)*exp(h*x +0.5* h*h*vol);
     }
 };
 
-/*
-class lgmpde //only explicit method based discrete version
+struct lgmonefactor
 {
-    vector<double> payAtEnd;
-    vector<std::tuple<double,double>> upperLowerBoundary; //this should be zero for lgm
- 
-};
-*/
+    //a struct to initiata volatilty and mean reversion     
+    // let the vol vector include values for all possible 1 months
+    // then you can reduce this to the available swt of swaption expiries
+    //this can make vol lookup easier
+    std::vector<double> vol; 
+    double meanrev; // mean reversion parameter;
+    lgmmeanreversion H;
+    lgmonefactor (double expiry = 0.0, double m = 0.0):
+        vol(int(expiry/0.25)), meanrev(m) , H(m)   {} 
+        //give expiry in years, 
+        //assume vol vector will be provided
+        //for each starting three month period
 
+};
+
+struct swaption
+{
+    double expiry; //in num of months as of now
+    //this too is a multiple of 1months as of time 0
+    double tenor; //in numof months
+    double strike;
+    size_t numOfPeriods;
+    double mvalue; //market price (from volatility using Black's formula)
+    std::vector<unsigned int> paymTimes; 
+    //paymTimes are as in marketdata convention:
+    //multiples of 1 months as of time 0
+    swaption(double e, double s, vector<unsigned int> dates, double val):
+        expiry(e), tenor(e+dates.size()), strike(s), numOfPeriods(dates.size()), paymTimes(dates),
+        mvalue(val) 
+        {}
+};
 
 struct lgmswapprice
 {
@@ -120,33 +87,87 @@ struct lgmswapprice
     swaption& s;
 
     lgmswapprice(swaption& _s, timezero& _z, lgmonefactor& _m):
-    s(_s), z(_z), m(_m) {} 
+    s(_s), z(_z), m(_m) {;}
 
-    
     //this is not really the swap price
     //but the one divided by exp(-H_0 y*-0.5 H_0^2 v) 
     double operator()(double x) const //x is the X ~N(0,\alpha_t)
-    {         
+    {      
+        //cout<<z.tau[0] << z.disc[0]<<"\n";   
         double value = 0.0;
-        size_t j = 1;
-        size_t J = s.paymTimes.size(); //
         double hdiff, hsqrdiff;
+        //cout<<"before"<<"\n";
         for(auto const& i: s.paymTimes) 
-        {
-            if (j == J) break;
-            z.disc[i];
+        {             
             hdiff = m.H(i * mdsep) - m.H(s.expiry * mdsep);
             hsqrdiff = hdiff *(m.H(i *mdsep) + m.H(s.expiry * mdsep));
             value += z.tau[i] * z.disc[i] * exp(-hdiff * x - 0.5* hsqrdiff *m.vol[s.expiry]);
-            ++j;
         }
+        
+        value *= s.strike ;
         //VOL here for the expiry, so is fixed
+        size_t J = s.paymTimes.size(); //
         hdiff = m.H(s.paymTimes[J-1] * mdsep) - m.H(s.expiry * mdsep);
         hsqrdiff = hdiff *(m.H(s.paymTimes[J-1] *mdsep) + m.H(s.expiry * mdsep));
-        value = s.strike * value;
         value += z.disc[s.paymTimes[J-1]]* exp(-hdiff * x - 0.5* hsqrdiff *m.vol[s.expiry]);
-        value += -z.disc[s.paymTimes[0]] ;
+        //assuming as usual xpiry =swap start date
+        value += -z.disc[s.expiry] ;
+         
         return value;
     }
-
 };
+
+//should take a model (volatility and mean rversion param)
+//and some other data (strike etc.)
+//and produce a swaption price
+//THIS WILL BE A FUNCTOR in volatility
+struct lgmswaptionprice
+{
+    swaption& s;
+    timezero& z; 
+    lgmonefactor& m; //model->meanrev
+    lgmswapprice p;    
+
+    lgmswaptionprice(swaption& _s, timezero& _z, lgmonefactor& _m ): 
+            s(_s), z(_z), m(_m), p(_s,_z,_m){;}
+
+    double operator() (double vol)  const
+    {             
+        //there is composition here
+        //so please see if it is better to write separate functions
+        //and compose them, ala functional programming
+        double breakEvenRate = bisectionMethod(p,-50,50,0.0000001);
+        cout<<"\n"<<"(breakEvenRate " << breakEvenRate <<")"<<"\n"; 
+        double aux = 0;
+        double h;
+        for(auto const& i: s.paymTimes) 
+        {
+            h = m.H(i* mdsep) - m.H(s.expiry* mdsep);
+            aux += z.tau[i]*z.disc[i] 
+                        * normalCdf((breakEvenRate + vol* h)/sqrt(vol));
+            
+        }
+        aux *= s.strike;
+        //-D_0
+        aux += -z.disc[s.expiry]  * normalCdf(breakEvenRate/sqrt(vol));
+        //+D_end (the last h from above loop should be the the
+        //right h for below)
+        size_t J = s.paymTimes.size(); //
+        aux += z.disc[s.paymTimes[J-1]]  * normalCdf((breakEvenRate + vol* h)/sqrt(vol));
+                
+        return aux -s.mvalue;
+    }
+};
+
+ 
+
+/*
+class lgmpde //only explicit method based discrete version
+{
+    vector<double> payAtEnd;
+    vector<std::tuple<double,double>> upperLowerBoundary; //this should be zero for lgm
+ 
+};
+*/
+
+
