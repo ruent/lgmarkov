@@ -33,13 +33,14 @@ constexpr double lgmmeanrev(double& p, double& t )
 //a parallel to the timezero data
 struct lgmnumeraire  
 {
+    //variance is the "integral \alpha^2(t) dt" term  
     lgmmeanreversion& H;
     lgmnumeraire(lgmmeanreversion& _H): H(_H){}
-    double operator()(const double& disc, const double& vol,
+    double operator()(const double& disc, const double& variance,
                const double& t, const double& x) const
     {
         double h = H(t);
-        return (1/disc)*exp(h*x +0.5* h*h*vol);
+        return (1/disc)*exp(h*x +0.5* h*h*variance);
     }
 };
 
@@ -137,7 +138,7 @@ struct lgmswaptionprice
         //so please see if it is better to write separate functions
         //and compose them, ala functional programming
         double breakEvenRate = bisectionMethod(p,-50,50,0.0000001);
-        cout<<"\n"<<"(breakEvenRate " << breakEvenRate <<")"<<"\n"; 
+        std::cout<<"\n"<<"(breakEvenRate " << breakEvenRate <<")"<<"\n"; 
         double aux = 0;
         double h;
         for(auto const& i: s.paymTimes) 
@@ -160,14 +161,4 @@ struct lgmswaptionprice
 };
 
  
-
-/*
-class lgmpde //only explicit method based discrete version
-{
-    vector<double> payAtEnd;
-    vector<std::tuple<double,double>> upperLowerBoundary; //this should be zero for lgm
- 
-};
-*/
-
 
