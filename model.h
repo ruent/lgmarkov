@@ -1,11 +1,13 @@
  
 #pragma once 
 #include <vector>
+#include <map>
 #include <math.h>
  
 #include "../nonlinsolver/methods.h"
 #include "../marketdata/mdata.h"
 #include "../stats/statistics.h"
+#include "../elements/dates.h"
 
 const double mdsep = 1.0/12.0; //market data is for monthly increments
 
@@ -25,10 +27,10 @@ struct lgmmeanreversion //int_0^t exp(-\int_0^s param du) ds
 
 //a compiler handled version (see Gottschling Ch 5)
 //"let the compiler compute"
-constexpr double lgmmeanrev(double& p, double& t )
-{
-    return (1-exp(-t*p))/p;
-}
+//constexpr double lgmmeanrev(double& p, double& t )
+//{
+//    return (1-exp(-t*p))/p;
+//}
 
 //a parallel to the timezero data
 struct lgmnumeraire  
@@ -44,36 +46,46 @@ struct lgmnumeraire
     }
 };
 
+struct variancemap
+{
+    std::map<int, double, std::less<int>> variance;
+    variancemap(std::map<int, double, std::less<int>> _variance):
+               variance(_variance){}
+    double operator()(size_t lookup) const
+    {
+        for (auto k = variance.begin(), e = variance.end(); k != e; ++k)
+		{
+			if (lookup< k->first){
+                return k->second;
+            }
+		}
+    }           
+
+};
+
 struct lgmonefactor
 {
     //a struct to initiata volatilty and mean reversion     
-    // let the vol vector include values for all possible 1 months
-    // then you can reduce this to the available swt of swaption expiries
-    //this can make vol lookup easier
-    std::vector<double> vol; 
-    double meanrev; // mean reversion parameter;
+    // let the variance vector be paired with integer excel dates
+    //so (t,v) means v[0,t] where $t$ is the integer expiry date
+    
+    variancemap vmap;
     lgmmeanreversion H;
-    lgmonefactor (double expiry = 0.0, double m = 0.0):
-        vol(int(expiry/0.25)), meanrev(m) , H(m)   {} 
-        //give expiry in years, 
-        //assume vol vector will be provided
-        //for each starting three month period
-
+    lgmonefactor (double m, std::map<int, double, std::less<int>> variance):
+        H(m), vmap(variance)   {} 
+    
 };
 
 struct swaption
 {
-    double expiry; //in num of months as of now
-    //this too is a multiple of 1months as of time 0
-    double tenor; //in numof months
+    double expiry; 
     double strike;
-    size_t numOfPeriods;
+    double swaptenor;     
+    vector<unsigned int> swapdates; //start and all the payment dates
     double mvalue; //market price (from volatility using Black's formula)
-    std::vector<unsigned int> paymTimes; 
-    //paymTimes are as in marketdata convention:
-    //multiples of 1 months as of time 0
+    std::vector<unsigned int> swappaymTimes; //fixed leg payment times
     swaption(double e, double s, vector<unsigned int> dates, double val):
-        expiry(e), tenor(e+dates.size()), strike(s), numOfPeriods(dates.size()), paymTimes(dates),
+        expiry(e), strike(s), swaptenor(e+dates.size()), swapdates(dates),
         mvalue(val) 
         {}
 };
@@ -82,35 +94,41 @@ struct lgmswapprice
 {
     //using formula 5.7a from Hagan's "Evaluating and hedging ..."
     //swap is from a swaption
-    //no need  for an independent swap, I hope!  
+    //no need  for an independent swap!  
     lgmonefactor& m;  //mean reversion function H and vol data
     timezero& z; //cached discount factors
     swaption& s;
+    size_t pDate;
+    DayCountCalculator dayc; //is this good memory wise? maybe by reference?
 
-    lgmswapprice(swaption& _s, timezero& _z, lgmonefactor& _m):
-    s(_s), z(_z), m(_m) {;}
+    lgmswapprice(swaption& _s, timezero& _z, lgmonefactor& _m, size_t _pDate, std::string dayCMethod):
+    s(_s), z(_z), m(_m),  pDate(_pDate), dayc(dayCMethod){;}
 
     //this is not really the swap price
     //but the one divided by exp(-H_0 y*-0.5 H_0^2 v) 
+    //this division is only for rrot finding purposes, no other intention
     double operator()(double x) const //x is the X ~N(0,\alpha_t)
     {      
         //cout<<z.tau[0] << z.disc[0]<<"\n";   
         double value = 0.0;
         double hdiff, hsqrdiff;
         //cout<<"before"<<"\n";
-        for(auto const& i: s.paymTimes) 
-        {             
-            hdiff = m.H(i * mdsep) - m.H(s.expiry * mdsep);
-            hsqrdiff = hdiff *(m.H(i *mdsep) + m.H(s.expiry * mdsep));
-            value += z.tau[i] * z.disc[i] * exp(-hdiff * x - 0.5* hsqrdiff *m.vol[s.expiry]);
+        double expiry_yf = dayc.yFrac(pDate,s.expiry);
+        for(auto const& i: s.swapdates)
+        {    
+            double paymdate_yf = dayc.yFrac(pDate,i);
+            hdiff = m.H(paymdate_yf) - m.H(expiry_yf);
+            hsqrdiff = hdiff *(m.H(paymdate_yf) + m.H(expiry_yf));
+            value += z.tau[i] * z.disc[i] * exp(-hdiff * x - 0.5* hsqrdiff *m.vmap(s.expiry));
         }
         
         value *= s.strike ;
         //VOL here for the expiry, so is fixed
-        size_t J = s.paymTimes.size(); //
-        hdiff = m.H(s.paymTimes[J-1] * mdsep) - m.H(s.expiry * mdsep);
-        hsqrdiff = hdiff *(m.H(s.paymTimes[J-1] *mdsep) + m.H(s.expiry * mdsep));
-        value += z.disc[s.paymTimes[J-1]]* exp(-hdiff * x - 0.5* hsqrdiff *m.vol[s.expiry]);
+        size_t J = s.swapdates.size(); //
+        double lastpaym_yf = dayc.yFrac(pDate,s.swapdates[J-1]);
+        hdiff = m.H(lastpaym_yf) - m.H(expiry_yf);
+        hsqrdiff = hdiff *(m.H(lastpaym_yf) + m.H(expiry_yf));
+        value += z.disc[s.swapdates[J-1]]* exp(-hdiff * x - 0.5* hsqrdiff *m.vmap(s.expiry));
         //assuming as usual xpiry =swap start date
         value += -z.disc[s.expiry] ;
          
@@ -129,10 +147,10 @@ struct lgmswaptionprice
     lgmonefactor& m; //model->meanrev
     lgmswapprice p;    
 
-    lgmswaptionprice(swaption& _s, timezero& _z, lgmonefactor& _m ): 
-            s(_s), z(_z), m(_m), p(_s,_z,_m){;}
+    lgmswaptionprice(swaption& _s, timezero& _z, lgmonefactor& _m, size_t pDate, std::string dayCMethod ): 
+            s(_s), z(_z), m(_m), p(_s,_z,_m, pDate, dayCMethod){;}
 
-    double operator() (double vol)  const
+    double operator() (double variance)  const
     {             
         //there is composition here
         //so please see if it is better to write separate functions
@@ -141,20 +159,22 @@ struct lgmswaptionprice
         std::cout<<"\n"<<"(breakEvenRate " << breakEvenRate <<")"<<"\n"; 
         double aux = 0;
         double h;
-        for(auto const& i: s.paymTimes) 
+        double expiry_yf = p.dayc.yFrac(p.pDate,s.expiry);
+        for(auto const& i: s.swapdates) 
         {
-            h = m.H(i* mdsep) - m.H(s.expiry* mdsep);
+            double paymdate_yf = p.dayc.yFrac(p.pDate,i);
+            h = m.H(paymdate_yf) - m.H(expiry_yf);
             aux += z.tau[i]*z.disc[i] 
-                        * normalCdf((breakEvenRate + vol* h)/sqrt(vol));
+                        * normalCdf((breakEvenRate + variance* h)/sqrt(variance));
             
         }
         aux *= s.strike;
         //-D_0
-        aux += -z.disc[s.expiry]  * normalCdf(breakEvenRate/sqrt(vol));
+        aux += -z.disc[s.expiry]  * normalCdf(breakEvenRate/sqrt(variance));
         //+D_end (the last h from above loop should be the the
         //right h for below)
-        size_t J = s.paymTimes.size(); //
-        aux += z.disc[s.paymTimes[J-1]]  * normalCdf((breakEvenRate + vol* h)/sqrt(vol));
+        size_t J = s.swapdates.size(); //
+        aux += z.disc[s.swapdates[J-1]]  * normalCdf((breakEvenRate + variance* h)/sqrt(variance));
                 
         return aux -s.mvalue;
     }
