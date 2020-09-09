@@ -49,8 +49,26 @@ struct lgmnumeraire
 struct variancemap
 {
     std::map<int, double, std::less<int>> variance;
+    std::map<int, double, std::less<int>> volatility; 
+    //the integral of vol^2 is variance
+    //i.e. the alpha term in the documents
     variancemap(std::map<int, double, std::less<int>> _variance):
-               variance(_variance){}
+                variance(_variance){
+                double val_prev;
+                double time_prev;    
+                for (auto k = variance.begin(), e = variance.end(); k != e; ++k){
+                    if(k== variance.begin()){
+                        volatility.insert({k->first,sqrt(k->second/k->first)});
+                    }
+                    else{
+                        volatility.insert({k->first,sqrt((k->second-val_prev)/(k->first- time_prev))});
+                    }
+                    val_prev = k->second;
+                    time_prev = k->first;
+                }
+		}     
+
+
     double operator()(size_t lookup) const
     {
         for (auto k = variance.begin(), e = variance.end(); k != e; ++k)
@@ -119,7 +137,7 @@ struct lgmswapprice
             double paymdate_yf = dayc.yFrac(pDate,i);
             hdiff = m.H(paymdate_yf) - m.H(expiry_yf);
             hsqrdiff = hdiff *(m.H(paymdate_yf) + m.H(expiry_yf));
-            value += z.tau[i] * z.disc[i] * exp(-hdiff * x - 0.5* hsqrdiff *m.vmap(s.expiry));
+            value += z.tau(i) * z.disc(i) * exp(-hdiff * x - 0.5* hsqrdiff *m.vmap(s.expiry));
         }
         
         value *= s.strike ;
@@ -128,9 +146,9 @@ struct lgmswapprice
         double lastpaym_yf = dayc.yFrac(pDate,s.swapdates[J-1]);
         hdiff = m.H(lastpaym_yf) - m.H(expiry_yf);
         hsqrdiff = hdiff *(m.H(lastpaym_yf) + m.H(expiry_yf));
-        value += z.disc[s.swapdates[J-1]]* exp(-hdiff * x - 0.5* hsqrdiff *m.vmap(s.expiry));
+        value += z.disc(s.swapdates[J-1])* exp(-hdiff * x - 0.5* hsqrdiff *m.vmap(s.expiry));
         //assuming as usual xpiry =swap start date
-        value += -z.disc[s.expiry] ;
+        value += -z.disc(s.expiry) ;
          
         return value;
     }
@@ -164,17 +182,17 @@ struct lgmswaptionprice
         {
             double paymdate_yf = p.dayc.yFrac(p.pDate,i);
             h = m.H(paymdate_yf) - m.H(expiry_yf);
-            aux += z.tau[i]*z.disc[i] 
+            aux += z.tau(i)*z.disc(i) 
                         * normalCdf((breakEvenRate + variance* h)/sqrt(variance));
             
         }
         aux *= s.strike;
         //-D_0
-        aux += -z.disc[s.expiry]  * normalCdf(breakEvenRate/sqrt(variance));
+        aux += -z.disc(s.expiry)  * normalCdf(breakEvenRate/sqrt(variance));
         //+D_end (the last h from above loop should be the the
         //right h for below)
         size_t J = s.swapdates.size(); //
-        aux += z.disc[s.swapdates[J-1]]  * normalCdf((breakEvenRate + variance* h)/sqrt(variance));
+        aux += z.disc(s.swapdates[J-1])  * normalCdf((breakEvenRate + variance* h)/sqrt(variance));
                 
         return aux -s.mvalue;
     }
