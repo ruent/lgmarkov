@@ -83,7 +83,7 @@ struct variancemap
 
 struct lgmonefactor
 {
-    //a struct to initiata volatilty and mean reversion     
+    //a struct to initiata volatility and mean reversion     
     // let the variance vector be paired with integer excel dates
     //so (t,v) means v[0,t] where $t$ is the integer expiry date
     
@@ -193,7 +193,6 @@ struct lgmswaptionprice
         //right h for below)
         size_t J = s.swapdates.size(); //
         aux += z.disc(s.swapdates[J-1])  * normalCdf((breakEvenRate + variance* h)/sqrt(variance));
-                
         return aux -s.mvalue;
     }
 };
