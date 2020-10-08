@@ -96,7 +96,7 @@ struct lgmonefactor
 
 struct swaption
 {
-    double expiry; 
+    unsigned int expiry; //a date, as in excel 
     double strike;
     double swaptenor;     
     vector<unsigned int> swapdates; //start and all the payment dates
