@@ -48,37 +48,43 @@ struct lgmnumeraire
 
 struct variancemap
 {
-    std::map<int, double, std::less<int>> variance;
-    std::map<int, double, std::less<int>> volatility; 
+    std::map<size_t, double, std::less<size_t>> variance;
+    std::map<size_t, double, std::less<size_t>> volatility; 
     //the integral of vol^2 is variance
     //i.e. the alpha term in the documents
-    variancemap(std::map<int, double, std::less<int>> _variance):
+    variancemap(std::map<size_t, double, std::less<size_t>> _variance):
                 variance(_variance){
-                double val_prev;
-                double time_prev;    
-                for (auto k = variance.begin(), e = variance.end(); k != e; ++k){
-                    if(k== variance.begin()){
-                        volatility.insert({k->first,sqrt(k->second/k->first)});
-                    }
-                    else{
-                        volatility.insert({k->first,sqrt((k->second-val_prev)/(k->first- time_prev))});
-                    }
-                    val_prev = k->second;
-                    time_prev = k->first;
-                }
-		}     
+        double val_prev;
+        double time_prev;    
+        for (auto k = variance.begin(), e = variance.end(); k != e; ++k){
+            if(k== variance.begin()){
+                volatility.insert({k->first,sqrt(k->second/k->first)});
+            }
+            else{
+                volatility.insert({k->first,sqrt((k->second-val_prev)/(k->first- time_prev))});
+            }
+            val_prev = k->second;
+            time_prev = k->first;
+        }
+	} 
+
+    //variancemap(const variancemap& rhs):
+    //    variancemap(rhs.variance){
+    //}
+
+
+
 
 
     double operator()(size_t lookup) const
     {
-        for (auto k = variance.begin(), e = variance.end(); k != e; ++k)
-		{
+        for (auto k = variance.begin(), e = variance.end(); k != e; ++k){
 			if (lookup< k->first){
                 return k->second;
             }
 		}
+        return 0.0;
     }           
-
 };
 
 struct lgmonefactor
@@ -89,9 +95,11 @@ struct lgmonefactor
     
     variancemap vmap;
     lgmmeanreversion H;
-    lgmonefactor (double m, std::map<int, double, std::less<int>> variance):
-        H(m), vmap(variance)   {} 
-    
+    //lgmonefactor (double m, std::map<size_t, double, std::less<size_t>> & variance):
+    //    H(m), vmap(variance)   {} 
+    lgmonefactor (double m, variancemap& _variancemap):
+        H(m), vmap(_variancemap)  {} 
+    //IT LOOKS like default copy-constructer for varaincemap works
 };
 
 struct swaption
